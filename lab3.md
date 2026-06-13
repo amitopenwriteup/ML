@@ -232,6 +232,288 @@ Result:
 Pass (4 votes)
 ```
 
+Think of your code as **teaching a student and then giving an exam**.
+
+---
+
+## Step 1: Read the data
+
+```python
+df = pd.read_csv("data/raw/dataset.csv")
+```
+
+This loads the CSV file into memory.
+
+Example:
+
+| age | income | credit_score | target |
+| --- | ------ | ------------ | ------ |
+| 25  | 30000  | 700          | 1      |
+| 40  | 50000  | 600          | 0      |
+
+The data becomes a table called `df`.
+
+---
+
+## Step 2: Separate Questions and Answers
+
+```python
+X = df.drop("target", axis=1)
+y = df["target"]
+```
+
+Imagine a teacher giving:
+
+### Questions (X)
+
+```text
+age
+income
+credit_score
+loan_amount
+...
+```
+
+### Answers (y)
+
+```text
+target
+```
+
+Example:
+
+| Age | Income | Target |
+| --- | ------ | ------ |
+| 25  | 30000  | 1      |
+| 40  | 50000  | 0      |
+
+The model's job is:
+
+```text
+Given Age + Income + Credit Score
+Predict Target
+```
+
+---
+
+## Step 3: Split Data
+
+```python
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.2, random_state=42
+)
+```
+
+Suppose you have 1000 rows.
+
+```text
+800 rows → Training
+200 rows → Testing
+```
+
+Training data teaches the model.
+
+Testing data checks whether it learned correctly.
+
+---
+
+## Step 4: Create the Model
+
+```python
+model = RandomForestClassifier(
+    n_estimators=100,
+    max_depth=5,
+    random_state=42
+)
+```
+
+### Random Forest = 100 decision trees
+
+Imagine asking 100 experts:
+
+```text
+Expert 1 → Yes
+Expert 2 → No
+Expert 3 → Yes
+...
+```
+
+The majority answer wins.
+
+That's exactly what Random Forest does.
+
+```python
+n_estimators=100
+```
+
+means:
+
+```text
+Create 100 trees
+```
+
+```python
+max_depth=5
+```
+
+means:
+
+```text
+Each tree can ask at most 5 levels of questions
+```
+
+---
+
+## Step 5: Train the Model
+
+```python
+model.fit(X_train, y_train)
+```
+
+This is the learning step.
+
+The model studies examples like:
+
+```text
+Age=25 Income=30000 → Target=1
+Age=40 Income=50000 → Target=0
+Age=35 Income=45000 → Target=1
+```
+
+and learns patterns.
+
+---
+
+## Step 6: Take the Exam
+
+```python
+preds = model.predict(X_test)
+```
+
+Now the model sees new rows it never saw before.
+
+Example:
+
+```text
+Age=30 Income=40000
+```
+
+and predicts:
+
+```text
+Target = 1
+```
+
+---
+
+## Step 7: Check Marks
+
+### Accuracy
+
+```python
+accuracy_score(y_test, preds)
+```
+
+Measures:
+
+```text
+How many answers were correct?
+```
+
+Example:
+
+```text
+200 questions
+160 correct
+```
+
+Accuracy:
+
+```text
+160 / 200 = 80%
+```
+
+---
+
+### F1 Score
+
+```python
+f1_score(y_test, preds)
+```
+
+Another way to measure quality.
+
+Range:
+
+```text
+0 = bad
+1 = perfect
+```
+
+---
+
+## Step 8: Save the Trained Model
+
+```python
+with open("models/model.pkl", "wb") as f:
+    pickle.dump(model, f)
+```
+
+After learning, save the model to a file:
+
+```text
+models/model.pkl
+```
+
+Think of it as:
+
+```text
+Train once
+Save the brain
+Reuse later
+```
+
+Without saving:
+
+```text
+Every time you start
+you must train again
+```
+
+With saving:
+
+```text
+Load the trained model
+and predict immediately
+```
+
+---
+
+## Complete Flow
+
+```text
+dataset.csv
+      ↓
+Load Data
+      ↓
+Separate Features & Target
+      ↓
+Split Train/Test
+      ↓
+Train Random Forest
+      ↓
+Predict on Test Data
+      ↓
+Calculate Accuracy & F1
+      ↓
+Save model.pkl
+```
+
+In one sentence:
+
+**This script teaches a Random Forest model using historical data, tests how well it learned, and saves the trained model for future use.**
+
+
 ---
 
 ## Why Random Forest Is Popular
