@@ -138,7 +138,11 @@ Instrument your training script to log parameters, metrics, and model artifacts 
 
 ```bash
 pip install mlflow
-mlflow ui --host 0.0.0.0 --port 5000
+mlflow server \
+  --host 0.0.0.0 \
+  --port 5000 \
+  --allowed-hosts "*" \
+  --cors-allowed-origins "http://172.22.109.115:5000"
 ```
 
 Open your browser at **http://localhost:5000**
