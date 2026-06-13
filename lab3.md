@@ -966,3 +966,169 @@ So the key idea is:
 
 **Random Forest trains the model, while MLflow keeps a complete history of every experiment so you can compare runs and find the best model.**
 
+
+ection 3 — Data & Model Versioning with DVC
+Duration: 25 minutes
+
+Goal
+Version your dataset and model artifacts so any past experiment can be perfectly reproduced.
+
+Step 3.1 — Initialize DVC
+pip install dvc
+git init          # if not already done
+dvc init
+git add .dvc
+git commit -m "Initialize DVC"
+Step 3.2 — Track Your Dataset
+dvc add data/raw/dataset.csv
+git add data/raw/dataset.csv.dvc .gitignore
+git commit -m "Track raw dataset v1 with DVC"
+git tag -a "data-v1" -m "Initial dataset version"
+DVC creates a .dvc pointer file — the actual data stays out of Git.
+
+Step 3.3 — Configure Remote Storage (Local Simulation)
+# Simulate a remote using a local folder
+mkdir /tmp/dvc-remote
+dvc remote add -d localremote /tmp/dvc-remote
+dvc push
+In production, replace with:
+
+dvc remote add -d s3remote s3://your-bucket/dvc-store
+Step 3.4 — Create a DVC Pipeline
+Create dvc.yaml:
+
+stages:
+  train:
+    cmd: python src/train.py
+    deps:
+      - src/train.py
+      - data/raw/dataset.csv
+    params:
+      - params.yaml:
+          - n_estimators
+          - max_depth
+          - test_size
+    outs:
+      - models/model.pkl
+    metrics:
+      - reports/metrics.json:
+          cache: false
+Create params.yaml:
+
+n_estimators: 100
+max_depth: 5
+test_size: 0.2
+random_state: 42
+Run the pipeline:
+
+dvc repro
+Step 3.5 — Simulate Version Switch
+Make a change to your dataset (e.g., add a row or change a column), then:
+
+dvc add data/raw/dataset.csv
+git add data/raw/dataset.csv.dvc
+git commit -m "Dataset updated — v2"
+git tag -a "data-v2" -m "Updated dataset"
+dvc push
+Restore v1:
+
+git checkout data-v1
+dvc checkout
+python src/train.py  # Reproduces original results exactly
+Step 3.6 — Fix: output 'models/model.pkl' does not exist
+If dvc repro fails with this error:
+
+MLflow Run ID: 1b98af26c0314c909a9165b4323048a5
+ERROR: failed to reproduce 'train': output 'models/model.pkl' does not exist
+This means train.py runs successfully (MLflow logs the run) but never writes models/model.pkl or reports/metrics.json to disk — so DVC cannot find its expected outputs.
+
+Fix — update src/train.py to write both files:
+
+Add os.makedirs and both save blocks at the end of the script, inside the mlflow.start_run block:
+
+import os
+import json
+import pickle
+import mlflow
+import mlflow.sklearn
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import accuracy_score, f1_score
+
+N_ESTIMATORS = int(os.environ.get("N_ESTIMATORS", 100))
+MAX_DEPTH     = int(os.environ.get("MAX_DEPTH", 5))
+TEST_SIZE     = float(os.environ.get("TEST_SIZE", 0.2))
+RANDOM_STATE  = int(os.environ.get("RANDOM_STATE", 42))
+DATA_PATH     = os.environ.get("DATA_PATH", "data/raw/dataset.csv")
+
+df = pd.read_csv(DATA_PATH)
+X = df.drop("target", axis=1)
+y = df["target"]
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=TEST_SIZE, random_state=RANDOM_STATE
+)
+
+mlflow.set_experiment("mlops-workshop")
+run_name = f"rf-d{MAX_DEPTH}-n{N_ESTIMATORS}"
+
+with mlflow.start_run(run_name=run_name):
+    mlflow.log_param("n_estimators", N_ESTIMATORS)
+    mlflow.log_param("max_depth", MAX_DEPTH)
+    mlflow.log_param("test_size", TEST_SIZE)
+    mlflow.log_param("data_path", DATA_PATH)
+
+    model = RandomForestClassifier(
+        n_estimators=N_ESTIMATORS,
+        max_depth=MAX_DEPTH,
+        random_state=RANDOM_STATE
+    )
+    model.fit(X_train, y_train)
+
+    preds = model.predict(X_test)
+    acc = accuracy_score(y_test, preds)
+    f1  = f1_score(y_test, preds, average="weighted")
+
+    mlflow.log_metric("accuracy", acc)
+    mlflow.log_metric("f1_score", f1)
+    mlflow.sklearn.log_model(model, artifact_path="random-forest-model")
+
+    # Save model for DVC
+    os.makedirs("models", exist_ok=True)
+    with open("models/model.pkl", "wb") as f:
+        pickle.dump(model, f)
+
+    # Save metrics for DVC
+    os.makedirs("reports", exist_ok=True)
+    with open("reports/metrics.json", "w") as mf:
+        json.dump({"accuracy": round(acc, 4), "f1_score": round(f1, 4)}, mf, indent=2)
+
+    print(f"n_estimators={N_ESTIMATORS}  max_depth={MAX_DEPTH}")
+    print(f"Run complete — Accuracy: {acc:.4f} | F1: {f1:.4f}")
+    print(f"MLflow Run ID: {mlflow.active_run().info.run_id}")
+    print("Model saved   > models/model.pkl")
+    print("Metrics saved > reports/metrics.json")
+Verify the files are created before running DVC:
+
+python src/train.py
+ls models/model.pkl        # must exist
+ls reports/metrics.json    # must exist
+Then run DVC:
+
+dvc repro
+dvc push
+git add .
+git commit -m "Fix train.py to write model and metrics for DVC"
+Root cause: dvc.yaml declares models/model.pkl and reports/metrics.json as outputs. If train.py does not write them, DVC considers the stage failed even if MLflow logged the run successfully. MLflow and DVC track the same training run independently — MLflow tracks metadata, DVC tracks files on disk.
+
+[x] Checkpoint
+ Dataset tracked with dvc add and committed to Git
+ Pipeline runs via dvc repro
+ models/model.pkl and reports/metrics.json both exist after run
+ Successfully switched between dataset versions
+Common Issue — DVC Cache Errors
+If you see any of the following errors after dvc checkout or dvc repro:
+
+WARNING: No file hash info found for 'models/model.pkl'
+ERROR: Checkout failed for following targets: models/model.pkl
+FileNotFoundError: No such file or directory: 'data/raw/dataset.csv'
