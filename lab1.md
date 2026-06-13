@@ -35,18 +35,19 @@ Before starting, confirm the following are ready on your machine:
 | Section | Topic | Duration |
 |---|---|---|
 | 1 | Local ML Workflow Walkthrough | 20 min |
-| 2 | Experiment Tracking with MLflow / W&B | 30 min |
-| 3 | Data & Model Versioning with DVC | 30 min |
-| ☕ | Break | 5 min |
-| 4 | Validation & Monitoring with Evidently | 45 min |
-| 5 | End-to-End Pipeline Execution | 25 min |
-| 6 | Conclusion & Q&A | 25 min |
+| 2 | Experiment Tracking with MLflow / W&B | 25 min |
+| 3 | Data & Model Versioning with DVC | 25 min |
+| Break | — | 20 min |
+| 4 | Validation & Monitoring with Evidently | 40 min |
+| 5 | End-to-End Pipeline Execution | 20 min |
+| 6 | Conclusion & Q&A | 30 min |
+| **Total** | | **180 min** |
 
 ---
 
 ## Section 1 — Local ML Workflow Walkthrough
 
-**⏱ Duration: 20 minutes**
+**Duration: 20 minutes**
 
 ### Goal
 Run a basic ML workflow and identify what's missing for production.
@@ -111,7 +112,7 @@ Run it:
 python src/train.py
 ```
 
-### 🔍 Discussion: What's Missing?
+### Discussion: Discussion: What's Missing?
 
 After running the script, reflect on these questions:
 
@@ -129,7 +130,7 @@ After running the script, reflect on these questions:
 
 ## Section 2 — Experiment Tracking with MLflow
 
-**⏱ Duration: 30 minutes**
+**Duration: 25 minutes**
 
 ### Goal
 Instrument your training script to log parameters, metrics, and model artifacts — and compare runs visually.
@@ -145,13 +146,16 @@ mlflow server \
   --cors-allowed-origins "http://172.22.109.115:5000"
 ```
 
-Open your browser at **http://localhost:5000**
+Open your browser at **http://172.22.109.115:5000**
 
 ### Step 2.2 — Instrument `train.py` with MLflow
+
+> NOTE: **Fix applied:** The original script used hardcoded values — environment variables passed via `MAX_DEPTH=10 python src/train.py` were silently ignored. All config values now read from `os.environ` with fallback defaults. The deprecated `artifact_path` positional argument is also replaced with a keyword argument.
 
 Replace your training script with this tracked version:
 
 ```python
+import os
 import mlflow
 import mlflow.sklearn
 import pandas as pd
@@ -159,12 +163,12 @@ from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score, f1_score
 
-# --- Config (easily swappable via env vars later) ---
-N_ESTIMATORS = 100
-MAX_DEPTH = 5
-TEST_SIZE = 0.2
-RANDOM_STATE = 42
-DATA_PATH = "data/raw/dataset.csv"
+# --- Config: reads from env vars, falls back to defaults ---
+N_ESTIMATORS = int(os.environ.get("N_ESTIMATORS", 100))
+MAX_DEPTH     = int(os.environ.get("MAX_DEPTH", 5))
+TEST_SIZE     = float(os.environ.get("TEST_SIZE", 0.2))
+RANDOM_STATE  = int(os.environ.get("RANDOM_STATE", 42))
+DATA_PATH     = os.environ.get("DATA_PATH", "data/raw/dataset.csv")
 
 # --- Load Data ---
 df = pd.read_csv(DATA_PATH)
@@ -177,7 +181,9 @@ X_train, X_test, y_train, y_test = train_test_split(
 # --- MLflow Experiment ---
 mlflow.set_experiment("mlops-workshop")
 
-with mlflow.start_run(run_name="rf-baseline"):
+run_name = f"rf-d{MAX_DEPTH}-n{N_ESTIMATORS}"
+
+with mlflow.start_run(run_name=run_name):
 
     # Log parameters
     mlflow.log_param("n_estimators", N_ESTIMATORS)
@@ -196,15 +202,16 @@ with mlflow.start_run(run_name="rf-baseline"):
     # Evaluate
     preds = model.predict(X_test)
     acc = accuracy_score(y_test, preds)
-    f1 = f1_score(y_test, preds, average="weighted")
+    f1  = f1_score(y_test, preds, average="weighted")
 
     # Log metrics
     mlflow.log_metric("accuracy", acc)
     mlflow.log_metric("f1_score", f1)
 
-    # Log model as artifact
-    mlflow.sklearn.log_model(model, "random-forest-model")
+    # Log model as artifact (use keyword argument to avoid deprecation warning)
+    mlflow.sklearn.log_model(model, artifact_path="random-forest-model")
 
+    print(f"n_estimators={N_ESTIMATORS}  max_depth={MAX_DEPTH}")
     print(f"Run complete — Accuracy: {acc:.4f} | F1: {f1:.4f}")
     print(f"MLflow Run ID: {mlflow.active_run().info.run_id}")
 ```
@@ -222,20 +229,23 @@ MAX_DEPTH=10 python src/train.py
 
 # Run 3: more estimators
 N_ESTIMATORS=200 python src/train.py
+
+# Run 4: both changed
+MAX_DEPTH=10 N_ESTIMATORS=200 python src/train.py
 ```
 
-> For environment variable injection, use `os.environ.get("N_ESTIMATORS", 100)` in the script.
+Each run will now produce **different accuracy values** and appear in the MLflow UI with distinct names (`rf-d5-n100`, `rf-d10-n100`, etc.).
 
 ### Step 2.4 — Compare in the MLflow UI
 
-Go to **http://localhost:5000**, open your experiment, and:
-1. Select all runs → click **Compare**
+Go to **http://172.22.109.115:5000**, open your experiment, and:
+1. Select all runs > click **Compare**
 2. View parameter vs. metric scatter plots
 3. Check the **Artifacts** tab for saved models
 
-### ✅ Checkpoint
+### [x] Checkpoint
 
-- [ ] At least 3 runs visible in MLflow UI
+- [ ] At least 3 runs visible in MLflow UI with different metrics
 - [ ] Parameters, metrics, and model artifact logged per run
 - [ ] Able to identify best-performing run by F1 score
 
@@ -243,7 +253,7 @@ Go to **http://localhost:5000**, open your experiment, and:
 
 ## Section 3 — Data & Model Versioning with DVC
 
-**⏱ Duration: 30 minutes**
+**Duration: 25 minutes**
 
 ### Goal
 Version your dataset and model artifacts so any past experiment can be perfectly reproduced.
@@ -339,7 +349,7 @@ dvc checkout
 python src/train.py  # Reproduces original results exactly
 ```
 
-### ✅ Checkpoint
+### [x] Checkpoint
 
 - [ ] Dataset tracked with `dvc add` and committed to Git
 - [ ] Pipeline runs via `dvc repro`
@@ -347,13 +357,13 @@ python src/train.py  # Reproduces original results exactly
 
 ---
 
-## ☕ Break — 5 Minutes
+## Break — 20 Minutes
 
 ---
 
 ## Section 4 — Validation & Monitoring with Evidently
 
-**⏱ Duration: 45 minutes**
+**Duration: 40 minutes**
 
 ### Goal
 Run model quality validation, detect data drift, and generate monitoring reports.
@@ -418,7 +428,7 @@ drift_report.run(
     current_data=prod_features
 )
 drift_report.save_html("reports/data_drift_report.html")
-print("Data drift report saved → reports/data_drift_report.html")
+print("Data drift report saved > reports/data_drift_report.html")
 
 # --- Data Quality Report ---
 quality_report = Report(metrics=[DataQualityPreset()])
@@ -427,7 +437,7 @@ quality_report.run(
     current_data=prod_features
 )
 quality_report.save_html("reports/data_quality_report.html")
-print("Data quality report saved → reports/data_quality_report.html")
+print("Data quality report saved > reports/data_quality_report.html")
 ```
 
 ```bash
@@ -463,7 +473,7 @@ perf_report.run(
     column_mapping={"target": "target", "prediction": "prediction"}
 )
 perf_report.save_html("reports/model_performance_report.html")
-print("Model performance report saved → reports/model_performance_report.html")
+print("Model performance report saved > reports/model_performance_report.html")
 ```
 
 ### Step 4.5 — Validation Gates (Automated Quality Check)
@@ -485,7 +495,7 @@ with open("reports/metrics.json") as f:
 failed = []
 for metric, threshold in THRESHOLDS.items():
     value = metrics.get(metric, 0)
-    status = "✅ PASS" if value >= threshold else "❌ FAIL"
+    status = "[x] PASS" if value >= threshold else "❌ FAIL"
     print(f"{status} | {metric}: {value:.4f} (threshold: {threshold})")
     if value < threshold:
         failed.append(metric)
@@ -501,7 +511,7 @@ else:
 python src/validate.py
 ```
 
-### ✅ Checkpoint
+### [x] Checkpoint
 
 - [ ] Data drift report generated in `reports/`
 - [ ] Feature distribution shift visible for drifted columns
@@ -512,7 +522,7 @@ python src/validate.py
 
 ## Section 5 — End-to-End Pipeline Execution
 
-**⏱ Duration: 25 minutes**
+**Duration: 20 minutes**
 
 ### Goal
 Execute the full pipeline from versioned data through to monitoring report — in a single reproducible sequence.
@@ -551,14 +561,14 @@ dvc push
 
 echo ""
 echo "=============================="
-echo " Pipeline Complete ✅"
+echo " Pipeline Complete [x]"
 echo "=============================="
 echo "Artifacts:"
-echo "  Model      → models/model.pkl"
-echo "  Metrics    → reports/metrics.json"
-echo "  Drift      → reports/data_drift_report.html"
-echo "  Quality    → reports/data_quality_report.html"
-echo "  MLflow UI  → http://localhost:5000"
+echo "  Model      > models/model.pkl"
+echo "  Metrics    > reports/metrics.json"
+echo "  Drift      > reports/data_drift_report.html"
+echo "  Quality    > reports/data_quality_report.html"
+echo "  MLflow UI  > http://172.22.109.115:5000"
 ```
 
 Make it executable and run:
@@ -593,15 +603,15 @@ The pipeline should produce the **exact same metrics** as the previous run.
 ```
 Local                          Cloud Equivalent
 ─────────────────────────────────────────────────────
-/tmp/dvc-remote          →     S3 / GCS / Azure Blob
-mlflow ui (local)        →     MLflow on EC2 / Databricks
-python run_pipeline.sh   →     Airflow / Kubeflow / SageMaker Pipelines
-models/model.pkl         →     MLflow Model Registry
+/tmp/dvc-remote          >     S3 / GCS / Azure Blob
+mlflow server (local)    >     MLflow on EC2 / Databricks
+python run_pipeline.sh   >     Airflow / Kubeflow / SageMaker Pipelines
+models/model.pkl         >     MLflow Model Registry
 ```
 
 > The pipeline logic doesn't change — only the infrastructure wiring does.
 
-### ✅ Checkpoint
+### [x] Checkpoint
 
 - [ ] Full pipeline runs end-to-end with `run_pipeline.sh`
 - [ ] Reproducibility verified by deleting and re-running
@@ -612,20 +622,20 @@ models/model.pkl         →     MLflow Model Registry
 
 ## Section 6 — Conclusion & Q&A
 
-**⏱ Duration: 25 minutes**
+**Duration: 30 minutes**
 
-### What Changed: Local ML → MLOps
+### What Changed: Local ML > MLOps
 
 | Capability | Local Notebook | This Pipeline |
 |---|---|---|
-| Parameter tracking | 🚫 None | ✅ MLflow |
-| Experiment history | 🚫 None | ✅ MLflow UI |
-| Dataset versioning | 🚫 None | ✅ DVC |
-| Model versioning | 🚫 Overwritten | ✅ DVC + MLflow |
-| Reproducibility | 🚫 Manual/fragile | ✅ `dvc repro` |
-| Quality gates | 🚫 None | ✅ `validate.py` |
-| Drift detection | 🚫 None | ✅ Evidently |
-| Cloud portability | 🚫 Local only | ✅ Platform-agnostic |
+| Parameter tracking | [no] None | [x] MLflow |
+| Experiment history | [no] None | [x] MLflow UI |
+| Dataset versioning | [no] None | [x] DVC |
+| Model versioning | [no] Overwritten | [x] DVC + MLflow |
+| Reproducibility | [no] Manual/fragile | [x] `dvc repro` |
+| Quality gates | [no] None | [x] `validate.py` |
+| Drift detection | [no] None | [x] Evidently |
+| Cloud portability | [no] Local only | [x] Platform-agnostic |
 
 ### Do's and Don'ts
 
@@ -667,7 +677,7 @@ models/model.pkl         →     MLflow Model Registry
 ```bash
 # Ensure port 5000 is free
 lsof -i :5000
-mlflow ui --port 5001
+mlflow server --host 0.0.0.0 --port 5001 --allowed-hosts "*"
 ```
 
 **DVC checkout fails:**
@@ -689,6 +699,10 @@ pip install --upgrade evidently
 **Model produces different results across runs:**
 - Ensure `random_state` is set on all sklearn objects
 - Confirm the same dataset version is checked out via `dvc checkout`
+
+**All experiment runs show identical metrics:**
+- Ensure `train.py` reads env vars with `os.environ.get()` — hardcoded values ignore shell exports
+- Verify with: `N_ESTIMATORS=200 python -c "import os; print(os.environ.get('N_ESTIMATORS'))"`
 
 ---
 
