@@ -525,3 +525,444 @@ In one sentence:
 ✅ Good baseline model for classification and regression
 
 Because of these advantages, Random Forest is often one of the first models data scientists try before moving to more advanced methods like XGBoost, LightGBM, or neural networks.
+---------------------------
+
+Sure. Think of **MLflow as a notebook for your machine learning experiments**.
+
+Without MLflow:
+
+```text
+Run model
+↓
+Accuracy = 0.61
+
+Change parameter
+↓
+Run again
+↓
+Accuracy = 0.65
+
+Change parameter
+↓
+Run again
+↓
+Accuracy = 0.63
+```
+
+After a few runs, you forget:
+
+* Which parameters produced 0.65?
+* Which model file belongs to which run?
+* Which run was best?
+
+MLflow solves this.
+
+---
+
+# Step 2.1 — Start MLflow
+
+Install:
+
+```bash
+pip install mlflow
+```
+
+Start MLflow server:
+
+```bash
+mlflow server \
+  --host 0.0.0.0 \
+  --port 5000 \
+  --allowed-hosts "*" \
+  --cors-allowed-origins "http://172.22.109.115:5000"
+```
+
+Open:
+
+```text
+http://172.22.109.115:5000
+```
+
+Initially you'll see no experiments.
+
+---
+
+# Step 2.2 — Add MLflow to train.py
+
+Previously your script only did:
+
+```text
+Train model
+Print accuracy
+Save model
+```
+
+Now MLflow additionally records:
+
+```text
+Parameters
+Metrics
+Artifacts
+```
+
+---
+
+## Parameters
+
+These are settings used during training.
+
+Example:
+
+```python
+mlflow.log_param("n_estimators", N_ESTIMATORS)
+mlflow.log_param("max_depth", MAX_DEPTH)
+```
+
+Suppose:
+
+```bash
+MAX_DEPTH=10
+N_ESTIMATORS=200
+```
+
+MLflow stores:
+
+| Parameter    | Value |
+| ------------ | ----- |
+| max_depth    | 10    |
+| n_estimators | 200   |
+
+---
+
+## Metrics
+
+These measure performance.
+
+```python
+mlflow.log_metric("accuracy", acc)
+mlflow.log_metric("f1_score", f1)
+```
+
+Example:
+
+| Metric   | Value |
+| -------- | ----- |
+| accuracy | 0.67  |
+| f1_score | 0.65  |
+
+---
+
+## Artifacts
+
+Artifacts are files produced by the run.
+
+```python
+mlflow.sklearn.log_model(
+    model,
+    artifact_path="random-forest-model"
+)
+```
+
+MLflow stores:
+
+```text
+trained model
+```
+
+instead of just saving:
+
+```text
+models/model.pkl
+```
+
+locally.
+
+---
+
+# Why Environment Variables?
+
+Earlier you had:
+
+```python
+RandomForestClassifier(
+    n_estimators=100,
+    max_depth=5
+)
+```
+
+Hardcoded.
+
+So:
+
+```bash
+MAX_DEPTH=10 python train.py
+```
+
+did nothing.
+
+Now:
+
+```python
+MAX_DEPTH = int(os.environ.get("MAX_DEPTH", 5))
+```
+
+means:
+
+```text
+If MAX_DEPTH exists
+    use it
+Else
+    use 5
+```
+
+---
+
+Example:
+
+```bash
+MAX_DEPTH=10 python train.py
+```
+
+Model becomes:
+
+```python
+RandomForestClassifier(
+    max_depth=10
+)
+```
+
+---
+
+# Step 2.3 — Run Experiments
+
+### Run 1
+
+```bash
+python src/train.py
+```
+
+Logs:
+
+```text
+max_depth=5
+n_estimators=100
+```
+
+Run name:
+
+```text
+rf-d5-n100
+```
+
+---
+
+### Run 2
+
+```bash
+MAX_DEPTH=10 python src/train.py
+```
+
+Logs:
+
+```text
+max_depth=10
+n_estimators=100
+```
+
+Run name:
+
+```text
+rf-d10-n100
+```
+
+---
+
+### Run 3
+
+```bash
+N_ESTIMATORS=200 python src/train.py
+```
+
+Logs:
+
+```text
+max_depth=5
+n_estimators=200
+```
+
+Run name:
+
+```text
+rf-d5-n200
+```
+
+---
+
+### Run 4
+
+```bash
+MAX_DEPTH=10 N_ESTIMATORS=200 python src/train.py
+```
+
+Logs:
+
+```text
+max_depth=10
+n_estimators=200
+```
+
+Run name:
+
+```text
+rf-d10-n200
+```
+
+---
+
+# What MLflow Stores
+
+For each run:
+
+```text
+Run Name
+Parameters
+Metrics
+Model
+Timestamp
+Run ID
+```
+
+Example:
+
+```text
+Run: rf-d10-n200
+
+Parameters:
+max_depth=10
+n_estimators=200
+
+Metrics:
+accuracy=0.67
+f1_score=0.65
+
+Artifacts:
+random-forest-model
+```
+
+---
+
+# Step 2.4 — Compare Runs
+
+Open MLflow UI.
+
+You may see:
+
+| Run         | Depth | Trees | Accuracy | F1   |
+| ----------- | ----- | ----- | -------- | ---- |
+| rf-d5-n100  | 5     | 100   | 0.61     | 0.61 |
+| rf-d10-n100 | 10    | 100   | 0.64     | 0.63 |
+| rf-d5-n200  | 5     | 200   | 0.63     | 0.62 |
+| rf-d10-n200 | 10    | 200   | 0.67     | 0.65 |
+
+Now it's easy to answer:
+
+### Which run is best?
+
+Look at F1:
+
+```text
+rf-d10-n200
+F1 = 0.65
+```
+
+Best run.
+
+---
+
+# What "Compare" Does
+
+Select multiple runs.
+
+Click:
+
+```text
+Compare
+```
+
+MLflow shows:
+
+```text
+Parameters vs Accuracy
+Parameters vs F1
+Charts
+Tables
+```
+
+Instead of manually checking logs.
+
+---
+
+# Artifacts Tab
+
+Click a run.
+
+Open:
+
+```text
+Artifacts
+```
+
+You'll find:
+
+```text
+random-forest-model
+```
+
+This is the trained model for that specific run.
+
+Each run gets its own saved model.
+
+---
+
+# Checkpoint Explained
+
+By the end you should have:
+
+✅ At least 3 runs visible
+
+```text
+rf-d5-n100
+rf-d10-n100
+rf-d5-n200
+```
+
+✅ Parameters logged
+
+```text
+max_depth
+n_estimators
+```
+
+✅ Metrics logged
+
+```text
+accuracy
+f1_score
+```
+
+✅ Model artifact saved
+
+```text
+random-forest-model
+```
+
+✅ Able to identify best run
+
+```text
+Highest F1 Score
+```
+
+So the key idea is:
+
+**Random Forest trains the model, while MLflow keeps a complete history of every experiment so you can compare runs and find the best model.**
+
