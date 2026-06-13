@@ -349,11 +349,188 @@ dvc checkout
 python src/train.py  # Reproduces original results exactly
 ```
 
+### Step 3.6 — Fix: output 'models/model.pkl' does not exist
+
+If `dvc repro` fails with this error:
+
+```
+MLflow Run ID: 1b98af26c0314c909a9165b4323048a5
+ERROR: failed to reproduce 'train': output 'models/model.pkl' does not exist
+```
+
+This means `train.py` runs successfully (MLflow logs the run) but never writes `models/model.pkl` or `reports/metrics.json` to disk — so DVC cannot find its expected outputs.
+
+**Fix — update `src/train.py` to write both files:**
+
+Add `os.makedirs` and both save blocks at the end of the script, inside the `mlflow.start_run` block:
+
+```python
+import os
+import json
+import pickle
+import mlflow
+import mlflow.sklearn
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import accuracy_score, f1_score
+
+N_ESTIMATORS = int(os.environ.get("N_ESTIMATORS", 100))
+MAX_DEPTH     = int(os.environ.get("MAX_DEPTH", 5))
+TEST_SIZE     = float(os.environ.get("TEST_SIZE", 0.2))
+RANDOM_STATE  = int(os.environ.get("RANDOM_STATE", 42))
+DATA_PATH     = os.environ.get("DATA_PATH", "data/raw/dataset.csv")
+
+df = pd.read_csv(DATA_PATH)
+X = df.drop("target", axis=1)
+y = df["target"]
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=TEST_SIZE, random_state=RANDOM_STATE
+)
+
+mlflow.set_experiment("mlops-workshop")
+run_name = f"rf-d{MAX_DEPTH}-n{N_ESTIMATORS}"
+
+with mlflow.start_run(run_name=run_name):
+    mlflow.log_param("n_estimators", N_ESTIMATORS)
+    mlflow.log_param("max_depth", MAX_DEPTH)
+    mlflow.log_param("test_size", TEST_SIZE)
+    mlflow.log_param("data_path", DATA_PATH)
+
+    model = RandomForestClassifier(
+        n_estimators=N_ESTIMATORS,
+        max_depth=MAX_DEPTH,
+        random_state=RANDOM_STATE
+    )
+    model.fit(X_train, y_train)
+
+    preds = model.predict(X_test)
+    acc = accuracy_score(y_test, preds)
+    f1  = f1_score(y_test, preds, average="weighted")
+
+    mlflow.log_metric("accuracy", acc)
+    mlflow.log_metric("f1_score", f1)
+    mlflow.sklearn.log_model(model, artifact_path="random-forest-model")
+
+    # Save model for DVC
+    os.makedirs("models", exist_ok=True)
+    with open("models/model.pkl", "wb") as f:
+        pickle.dump(model, f)
+
+    # Save metrics for DVC
+    os.makedirs("reports", exist_ok=True)
+    with open("reports/metrics.json", "w") as mf:
+        json.dump({"accuracy": round(acc, 4), "f1_score": round(f1, 4)}, mf, indent=2)
+
+    print(f"n_estimators={N_ESTIMATORS}  max_depth={MAX_DEPTH}")
+    print(f"Run complete — Accuracy: {acc:.4f} | F1: {f1:.4f}")
+    print(f"MLflow Run ID: {mlflow.active_run().info.run_id}")
+    print("Model saved   > models/model.pkl")
+    print("Metrics saved > reports/metrics.json")
+```
+
+**Verify the files are created before running DVC:**
+
+```bash
+python src/train.py
+ls models/model.pkl        # must exist
+ls reports/metrics.json    # must exist
+```
+
+**Then run DVC:**
+
+```bash
+dvc repro
+dvc push
+git add .
+git commit -m "Fix train.py to write model and metrics for DVC"
+```
+
+**Root cause:** `dvc.yaml` declares `models/model.pkl` and `reports/metrics.json` as outputs. If `train.py` does not write them, DVC considers the stage failed even if MLflow logged the run successfully. MLflow and DVC track the same training run independently — MLflow tracks metadata, DVC tracks files on disk.
+
 ### [x] Checkpoint
 
 - [ ] Dataset tracked with `dvc add` and committed to Git
 - [ ] Pipeline runs via `dvc repro`
+- [ ] `models/model.pkl` and `reports/metrics.json` both exist after run
 - [ ] Successfully switched between dataset versions
+
+### Common Issue — DVC Cache Errors
+
+If you see any of the following errors after `dvc checkout` or `dvc repro`:
+
+```
+WARNING: No file hash info found for 'models/model.pkl'
+ERROR: Checkout failed for following targets: models/model.pkl
+FileNotFoundError: No such file or directory: 'data/raw/dataset.csv'
+```
+
+This means DVC is tracking files that were never pushed to its cache. Fix in order:
+
+**Step 1 — Restore the dataset**
+
+If `data/raw/dataset.csv` was deleted by `dvc checkout`, regenerate it:
+
+```python
+import pandas as pd, numpy as np
+np.random.seed(42); n = 1000
+df = pd.DataFrame({
+    'age': np.random.randint(18, 70, n),
+    'income': np.random.normal(50000, 15000, n).clip(15000, 120000).round(2),
+    'credit_score': np.random.randint(300, 850, n),
+    'loan_amount': np.random.normal(15000, 8000, n).clip(1000, 50000).round(2),
+    'employment_years': np.random.randint(0, 30, n),
+    'num_accounts': np.random.randint(1, 10, n),
+    'debt_ratio': np.random.uniform(0.1, 0.9, n).round(4),
+})
+prob = 1/(1+np.exp(-(-0.003*df.credit_score + 0.00001*df.loan_amount
+         - 0.000005*df.income + 1.5*df.debt_ratio
+         - 0.05*df.employment_years + 2.0)))
+df['target'] = (np.random.rand(n) < prob).astype(int)
+df.to_csv('data/raw/dataset.csv', index=False)
+print('Done', df.shape)
+```
+
+**Step 2 — Re-add to DVC and push to cache**
+
+```bash
+dvc add data/raw/dataset.csv
+git add data/raw/dataset.csv.dvc
+git commit -m "Re-track dataset with valid cache"
+dvc push
+```
+
+**Step 3 — Run the pipeline to regenerate the model**
+
+```bash
+dvc repro
+dvc push
+```
+
+**Step 4 — Verify**
+
+```bash
+dvc status      # should say: Data and pipelines are up to date
+dvc checkout    # should complete with no errors
+```
+
+**Root cause summary:**
+
+| Error | Cause | Fix |
+|---|---|---|
+| `dataset.csv` deleted | `dvc checkout` replaced it with cached version but cache was empty | Re-add and push the file |
+| `model.pkl` missing hash | Model was never run through `dvc repro`, only saved manually | Run `dvc repro` to let DVC manage it |
+| Cache out of date | `dvc push` was never run after `dvc add` | Always `dvc push` after `dvc add` |
+
+**Correct workflow going forward — always follow this order:**
+
+```bash
+# After any change to data or code:
+dvc repro       # regenerates outputs
+dvc push        # saves to cache
+git add .
+git commit -m "your message"
+```
 
 ---
 
@@ -373,6 +550,18 @@ Run model quality validation, detect data drift, and generate monitoring reports
 ```bash
 pip install evidently
 ```
+
+Check your version after install — the imports differ by version:
+
+```bash
+pip show evidently | grep Version
+```
+
+| Version | Import path |
+|---|---|
+| Below 0.4 | `pip install --upgrade evidently` to fix |
+| 0.4 - 0.6 | `from evidently.report import Report` |
+| 0.7+ | `from evidently.legacy.report import Report` (used in this workshop) |
 
 ### Step 4.2 — Simulate Reference vs. Production Data
 
@@ -406,38 +595,38 @@ python src/generate_drift.py
 
 ### Step 4.3 — Data Drift Report
 
-Create `src/monitoring.py`:
+Create `src/monitoring.py`.
+
+NOTE: Evidently 0.7+ moved the classic API under `evidently.legacy`. All imports below use this path. If you are on 0.4-0.6, replace `evidently.legacy.report` with `evidently.report` and `evidently.legacy.metric_preset` with `evidently.metric_preset`.
 
 ```python
+import os
 import pandas as pd
-from evidently.report import Report
-from evidently.metric_preset import DataDriftPreset, DataQualityPreset
+import pickle
+from evidently.legacy.report import Report
+from evidently.legacy.metric_preset import DataDriftPreset, DataQualityPreset, ClassificationPreset
+from evidently.legacy.pipeline.column_mapping import ColumnMapping
+
+os.makedirs("reports", exist_ok=True)
 
 # Load datasets
-reference = pd.read_csv("data/processed/reference.csv")
+reference  = pd.read_csv("data/processed/reference.csv")
 production = pd.read_csv("data/processed/production.csv")
 
-# Drop target for drift analysis
-ref_features = reference.drop("target", axis=1)
+ref_features  = reference.drop("target", axis=1)
 prod_features = production.drop("target", axis=1)
 
 # --- Data Drift Report ---
 drift_report = Report(metrics=[DataDriftPreset()])
-drift_report.run(
-    reference_data=ref_features,
-    current_data=prod_features
-)
+drift_report.run(reference_data=ref_features, current_data=prod_features)
 drift_report.save_html("reports/data_drift_report.html")
-print("Data drift report saved > reports/data_drift_report.html")
+print("Drift report saved   > reports/data_drift_report.html")
 
 # --- Data Quality Report ---
 quality_report = Report(metrics=[DataQualityPreset()])
-quality_report.run(
-    reference_data=ref_features,
-    current_data=prod_features
-)
+quality_report.run(reference_data=ref_features, current_data=prod_features)
 quality_report.save_html("reports/data_quality_report.html")
-print("Data quality report saved > reports/data_quality_report.html")
+print("Quality report saved > reports/data_quality_report.html")
 ```
 
 ```bash
@@ -448,32 +637,72 @@ Open `reports/data_drift_report.html` in your browser.
 
 ### Step 4.4 — Model Performance Monitoring
 
-Add model prediction tracking to the monitoring script:
+Add model prediction tracking to the same `src/monitoring.py` file, appended after the quality report block:
 
 ```python
-import pickle
-from evidently.metric_preset import ClassificationPreset
-
-# Load trained model
+# --- Model Performance Report ---
 with open("models/model.pkl", "rb") as f:
     model = pickle.load(f)
 
-# Generate predictions on both datasets
-ref_preds = model.predict(ref_features)
-prod_preds = model.predict(prod_features)
+reference["prediction"]  = model.predict(ref_features)
+production["prediction"] = model.predict(prod_features)
 
-reference["prediction"] = ref_preds
-production["prediction"] = prod_preds
+column_mapping = ColumnMapping(target="target", prediction="prediction")
 
-# Model Performance Report
 perf_report = Report(metrics=[ClassificationPreset()])
 perf_report.run(
     reference_data=reference,
     current_data=production,
-    column_mapping={"target": "target", "prediction": "prediction"}
+    column_mapping=column_mapping
 )
 perf_report.save_html("reports/model_performance_report.html")
-print("Model performance report saved > reports/model_performance_report.html")
+print("Performance report   > reports/model_performance_report.html")
+```
+
+The complete `src/monitoring.py` with all three reports combined:
+
+```python
+import os
+import pandas as pd
+import pickle
+from evidently.legacy.report import Report
+from evidently.legacy.metric_preset import DataDriftPreset, DataQualityPreset, ClassificationPreset
+from evidently.legacy.pipeline.column_mapping import ColumnMapping
+
+os.makedirs("reports", exist_ok=True)
+
+reference  = pd.read_csv("data/processed/reference.csv")
+production = pd.read_csv("data/processed/production.csv")
+
+ref_features  = reference.drop("target", axis=1)
+prod_features = production.drop("target", axis=1)
+
+drift_report = Report(metrics=[DataDriftPreset()])
+drift_report.run(reference_data=ref_features, current_data=prod_features)
+drift_report.save_html("reports/data_drift_report.html")
+print("Drift report saved   > reports/data_drift_report.html")
+
+quality_report = Report(metrics=[DataQualityPreset()])
+quality_report.run(reference_data=ref_features, current_data=prod_features)
+quality_report.save_html("reports/data_quality_report.html")
+print("Quality report saved > reports/data_quality_report.html")
+
+with open("models/model.pkl", "rb") as f:
+    model = pickle.load(f)
+
+reference["prediction"]  = model.predict(ref_features)
+production["prediction"] = model.predict(prod_features)
+
+column_mapping = ColumnMapping(target="target", prediction="prediction")
+
+perf_report = Report(metrics=[ClassificationPreset()])
+perf_report.run(
+    reference_data=reference,
+    current_data=production,
+    column_mapping=column_mapping
+)
+perf_report.save_html("reports/model_performance_report.html")
+print("Performance report   > reports/model_performance_report.html")
 ```
 
 ### Step 4.5 — Validation Gates (Automated Quality Check)
@@ -687,7 +916,50 @@ dvc pull
 dvc checkout
 ```
 
-**Evidently import error:**
+**DVC cache missing — dataset deleted or model.pkl has no hash:**
+
+Symptoms: `WARNING: No file hash info found`, `Checkout failed for models/model.pkl`, or `FileNotFoundError: data/raw/dataset.csv` immediately after `dvc checkout`.
+
+```bash
+# 1. Restore and re-track the dataset (see Section 3 — Common Issue for full script)
+dvc add data/raw/dataset.csv
+git add data/raw/dataset.csv.dvc
+git commit -m "Re-track dataset with valid cache"
+dvc push
+
+# 2. Regenerate the model via pipeline (never save model.pkl manually)
+dvc repro
+dvc push
+
+# 3. Confirm everything is clean
+dvc status
+```
+
+Rule: always run `dvc push` immediately after `dvc add` or `dvc repro`. Never copy `model.pkl` manually — let `dvc repro` create it.
+
+**Evidently import error — ModuleNotFoundError or ImportError:**
+
+Evidently 0.7+ moved the classic API under `evidently.legacy`. Check your version first:
+
+```bash
+pip show evidently | grep Version
+```
+
+If you see `ModuleNotFoundError: No module named 'evidently.report'` or `ImportError: cannot import name 'ColumnMapping' from 'evidently'`, update all imports in `src/monitoring.py`:
+
+```python
+# Old imports (Evidently 0.4 - 0.6) — causes errors on 0.7+
+from evidently.report import Report
+from evidently.metric_preset import DataDriftPreset
+from evidently import ColumnMapping
+
+# Fixed imports (Evidently 0.7+)
+from evidently.legacy.report import Report
+from evidently.legacy.metric_preset import DataDriftPreset, DataQualityPreset, ClassificationPreset
+from evidently.legacy.pipeline.column_mapping import ColumnMapping
+```
+
+If the package is missing entirely:
 ```bash
 pip install --upgrade evidently
 ```
