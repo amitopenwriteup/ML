@@ -300,10 +300,7 @@ Instrument your training script to log parameters, metrics, and model artifacts 
 With the virtual environment active:
 
 ```bash
-mlflow server \
-  --host 0.0.0.0 \
-  --port 5000 \
-  --allowed-hosts "*"
+mlflow server --host 0.0.0.0 --port 5000 --allowed-hosts "*" --cors-allowed-origins "*"
 ```
 
 Open your browser at **http://localhost:5000** (replace `localhost` with your machine's IP if accessing remotely).
