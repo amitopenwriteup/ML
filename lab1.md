@@ -1,16 +1,17 @@
 # MLOps Workshop: Local ML to Production-Ready Pipelines
 
-> **Duration:** 3 Hours | **Format:** Hands-on Demo + Practice | **Level:** Intermediate–Advanced
+> **Duration:** 3 Hours | **Format:** Hands-on Demo + Practice | **Level:** Intermediate-Advanced
 
 ---
 
 ## Workshop Overview
 
-This workshop walks you through building a production-grade MLOps pipeline from scratch. Starting with a raw local ML workflow, you'll progressively layer in experiment tracking, data versioning, model validation, and monitoring — ending with a fully reproducible, cloud-agnostic pipeline.
+This workshop walks you through building a production-grade MLOps pipeline from scratch. Starting with a raw local ML workflow, you'll progressively layer in experiment tracking, data versioning, model validation, and monitoring -- ending with a fully reproducible, cloud-agnostic pipeline.
 
 **By the end of this workshop, you will be able to:**
+- Set up an isolated Python project with a virtual environment
 - Identify the gaps between local ML notebooks and production-ready systems
-- Instrument a training pipeline with experiment tracking (MLflow or W&B)
+- Instrument a training pipeline with experiment tracking (MLflow)
 - Version datasets and models using DVC
 - Detect data drift and monitor model performance with Evidently
 - Execute a complete, reproducible end-to-end MLOps pipeline
@@ -23,10 +24,10 @@ Before starting, confirm the following are ready on your machine:
 
 - [ ] Python 3.8+ installed
 - [ ] Jupyter Notebook or VS Code
-- [ ] `pip install mlflow dvc evidently scikit-learn pandas numpy matplotlib`
-- [ ] Git initialized in your project folder (`git init`)
-- [ ] Dataset downloaded and placed in `/data/raw/` (CSV format recommended — e.g., UCI Wine Quality, Titanic, or Kaggle housing prices)
 - [ ] Basic familiarity with training an ML model in Python
+- [ ] Terminal / command line access (bash, zsh, or PowerShell)
+
+> Package installation (`mlflow`, `dvc`, `evidently`, `scikit-learn`, `pandas`, `numpy`, `matplotlib`) and dataset creation are covered in Section 0 below, inside a virtual environment.
 
 ---
 
@@ -34,42 +35,193 @@ Before starting, confirm the following are ready on your machine:
 
 | Section | Topic | Duration |
 |---|---|---|
+| 0 | Project Setup: Directory, Virtual Environment, Dataset | 15 min |
 | 1 | Local ML Workflow Walkthrough | 20 min |
-| 2 | Experiment Tracking with MLflow / W&B | 25 min |
+| 2 | Experiment Tracking with MLflow | 25 min |
 | 3 | Data & Model Versioning with DVC | 25 min |
-| Break | — | 20 min |
+| Break | -- | 15 min |
 | 4 | Validation & Monitoring with Evidently | 40 min |
 | 5 | End-to-End Pipeline Execution | 20 min |
-| 6 | Conclusion & Q&A | 30 min |
+| 6 | Conclusion & Q&A | 20 min |
 | **Total** | | **180 min** |
 
 ---
 
-## Section 1 — Local ML Workflow Walkthrough
+## Section 0 -- Project Setup: Directory, Virtual Environment, Dataset
+
+**Duration: 15 minutes**
+
+### Goal
+Create a clean project directory, isolate dependencies in a virtual environment, install required packages, and generate the dataset used throughout the workshop.
+
+### Step 0.1 -- Create the Project Directory Structure
+
+Use `mkdir` to create the full folder structure before writing any code:
+
+```bash
+mkdir mlops-workshop
+cd mlops-workshop
+
+mkdir -p data/raw data/processed
+mkdir models reports src
+```
+
+Verify the structure:
+
+```bash
+ls -R
+```
+
+You should see:
+
+```
+mlops-workshop/
+├── data/
+│   ├── raw/
+│   └── processed/
+├── models/
+├── reports/
+└── src/
+```
+
+### Step 0.2 -- Create and Activate a Virtual Environment
+
+A virtual environment keeps this workshop's dependencies isolated from the rest of your system.
+
+**macOS / Linux:**
+
+```bash
+python3 -m venv venv
+source venv/bin/activate
+```
+
+**Windows (PowerShell):**
+
+```powershell
+python -m venv venv
+venv\Scripts\Activate.ps1
+```
+
+**Windows (Command Prompt):**
+
+```cmd
+python -m venv venv
+venv\Scripts\activate.bat
+```
+
+Your terminal prompt should now show `(venv)` at the start of the line. This confirms the virtual environment is active.
+
+> Run every `python`, `pip`, `mlflow`, and `dvc` command for the rest of this workshop with the `venv` activated. If you close your terminal, re-activate it before continuing.
+
+### Step 0.3 -- Install Required Packages
+
+With the virtual environment active:
+
+```bash
+pip install --upgrade pip
+pip install pandas numpy scikit-learn matplotlib mlflow dvc evidently
+```
+
+Confirm the install:
+
+```bash
+pip list | grep -iE "pandas|numpy|scikit-learn|mlflow|dvc|evidently"
+```
+
+### Step 0.4 -- Create requirements.txt
+
+Save the installed package versions so the environment can be recreated later:
+
+```bash
+pip freeze > requirements.txt
+```
+
+### Step 0.5 -- Initialize Git
+
+```bash
+git init
+```
+
+Create a `.gitignore` file:
+
+```bash
+cat > .gitignore << 'EOF'
+venv/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+EOF
+```
+
+### Step 0.6 -- Generate the Dataset
+
+Create `src/generate_dataset.py`:
+
+```python
+import pandas as pd
+import numpy as np
+
+np.random.seed(42)
+n = 1000
+
+df = pd.DataFrame({
+    'age': np.random.randint(18, 70, n),
+    'income': np.random.normal(50000, 15000, n).clip(15000, 120000).round(2),
+    'credit_score': np.random.randint(300, 850, n),
+    'loan_amount': np.random.normal(15000, 8000, n).clip(1000, 50000).round(2),
+    'employment_years': np.random.randint(0, 30, n),
+    'num_accounts': np.random.randint(1, 10, n),
+    'debt_ratio': np.random.uniform(0.1, 0.9, n).round(4),
+})
+
+prob = 1 / (1 + np.exp(-(
+    -0.003 * df.credit_score
+    + 0.00001 * df.loan_amount
+    - 0.000005 * df.income
+    + 1.5 * df.debt_ratio
+    - 0.05 * df.employment_years
+    + 2.0
+)))
+
+df['target'] = (np.random.rand(n) < prob).astype(int)
+
+df.to_csv('data/raw/dataset.csv', index=False)
+print('Dataset created:', df.shape)
+print(df.head())
+```
+
+Run it:
+
+```bash
+python src/generate_dataset.py
+```
+
+Verify the file was created:
+
+```bash
+ls -lh data/raw/dataset.csv
+head -5 data/raw/dataset.csv
+```
+
+### Checkpoint -- Section 0
+
+- [ ] `mlops-workshop/` directory created with `data/raw`, `data/processed`, `models`, `reports`, `src` subfolders
+- [ ] Virtual environment created and activated (prompt shows `(venv)`)
+- [ ] `pandas`, `numpy`, `scikit-learn`, `matplotlib`, `mlflow`, `dvc`, `evidently` installed
+- [ ] `requirements.txt` created
+- [ ] Git initialized with `.gitignore`
+- [ ] `data/raw/dataset.csv` generated with 1000 rows
+
+---
+
+## Section 1 -- Local ML Workflow Walkthrough
 
 **Duration: 20 minutes**
 
 ### Goal
 Run a basic ML workflow and identify what's missing for production.
 
-### Step 1.1 — Project Structure
-
-Set up a clean project directory:
-
-```
-mlops-workshop/
-├── data/
-│   ├── raw/         ← your CSV dataset goes here
-│   └── processed/
-├── models/
-├── reports/
-├── src/
-│   └── train.py
-├── requirements.txt
-└── README.md
-```
-
-### Step 1.2 — Baseline Training Script
+### Step 1.1 -- Baseline Training Script
 
 Create `src/train.py`:
 
@@ -108,11 +260,12 @@ print("Model saved to models/model.pkl")
 ```
 
 Run it:
+
 ```bash
 python src/train.py
 ```
 
-### Discussion: Discussion: What's Missing?
+### Discussion: What's Missing?
 
 After running the script, reflect on these questions:
 
@@ -126,33 +279,39 @@ After running the script, reflect on these questions:
 
 > **Key Insight:** This script works locally today but is unauditable, unreproducible, and undeployable at scale.
 
+### Checkpoint -- Section 1
+
+- [ ] `src/train.py` runs successfully and prints accuracy and F1 score
+- [ ] `models/model.pkl` exists
+- [ ] Can list at least 3 production gaps from the table above
+
 ---
 
-## Section 2 — Experiment Tracking with MLflow
+## Section 2 -- Experiment Tracking with MLflow
 
 **Duration: 25 minutes**
 
 ### Goal
-Instrument your training script to log parameters, metrics, and model artifacts — and compare runs visually.
+Instrument your training script to log parameters, metrics, and model artifacts -- and compare runs visually.
 
-### Step 2.1 — Install & Start MLflow
+### Step 2.1 -- Start the MLflow Tracking Server
+
+With the virtual environment active:
 
 ```bash
-pip install mlflow
 mlflow server \
   --host 0.0.0.0 \
   --port 5000 \
-  --allowed-hosts "*" \
-  --cors-allowed-origins "http://172.22.109.115:5000"
+  --allowed-hosts "*"
 ```
 
-Open your browser at **http://172.22.109.115:5000**
+Open your browser at **http://localhost:5000** (replace `localhost` with your machine's IP if accessing remotely).
 
-### Step 2.2 — Instrument `train.py` with MLflow
+### Step 2.2 -- Instrument train.py with MLflow
 
-> NOTE: **Fix applied:** The original script used hardcoded values — environment variables passed via `MAX_DEPTH=10 python src/train.py` were silently ignored. All config values now read from `os.environ` with fallback defaults. The deprecated `artifact_path` positional argument is also replaced with a keyword argument.
+> **Note:** Config values are read from `os.environ` with fallback defaults, so environment variables like `MAX_DEPTH=10 python src/train.py` are respected. The model is logged with a keyword argument (`artifact_path=`) to avoid deprecation warnings.
 
-Replace your training script with this tracked version:
+Replace `src/train.py` with this tracked version:
 
 ```python
 import os
@@ -208,17 +367,17 @@ with mlflow.start_run(run_name=run_name):
     mlflow.log_metric("accuracy", acc)
     mlflow.log_metric("f1_score", f1)
 
-    # Log model as artifact (use keyword argument to avoid deprecation warning)
+    # Log model as artifact
     mlflow.sklearn.log_model(model, artifact_path="random-forest-model")
 
     print(f"n_estimators={N_ESTIMATORS}  max_depth={MAX_DEPTH}")
-    print(f"Run complete — Accuracy: {acc:.4f} | F1: {f1:.4f}")
+    print(f"Run complete -- Accuracy: {acc:.4f} | F1: {f1:.4f}")
     print(f"MLflow Run ID: {mlflow.active_run().info.run_id}")
 ```
 
-### Step 2.3 — Run Multiple Experiments
+### Step 2.3 -- Run Multiple Experiments
 
-Vary hyperparameters across runs to generate comparison data:
+Open a second terminal, activate the same `venv`, and vary hyperparameters across runs:
 
 ```bash
 # Run 1: baseline
@@ -234,66 +393,65 @@ N_ESTIMATORS=200 python src/train.py
 MAX_DEPTH=10 N_ESTIMATORS=200 python src/train.py
 ```
 
-Each run will now produce **different accuracy values** and appear in the MLflow UI with distinct names (`rf-d5-n100`, `rf-d10-n100`, etc.).
+Each run produces **different accuracy values** and appears in the MLflow UI with a distinct name (`rf-d5-n100`, `rf-d10-n100`, etc.).
 
-### Step 2.4 — Compare in the MLflow UI
+### Step 2.4 -- Compare in the MLflow UI
 
-Go to **http://172.22.109.115:5000**, open your experiment, and:
-1. Select all runs > click **Compare**
+Go to **http://localhost:5000**, open your experiment, and:
+
+1. Select all runs, then click **Compare**
 2. View parameter vs. metric scatter plots
 3. Check the **Artifacts** tab for saved models
 
-### [x] Checkpoint
+### Checkpoint -- Section 2
 
 - [ ] At least 3 runs visible in MLflow UI with different metrics
 - [ ] Parameters, metrics, and model artifact logged per run
-- [ ] Able to identify best-performing run by F1 score
+- [ ] Able to identify the best-performing run by F1 score
 
 ---
 
-## Section 3 — Data & Model Versioning with DVC
+## Section 3 -- Data & Model Versioning with DVC
 
 **Duration: 25 minutes**
 
 ### Goal
 Version your dataset and model artifacts so any past experiment can be perfectly reproduced.
 
-### Step 3.1 — Initialize DVC
+### Step 3.1 -- Initialize DVC
 
 ```bash
-pip install dvc
-git init          # if not already done
 dvc init
-git add .dvc
+git add .dvc .gitignore
 git commit -m "Initialize DVC"
 ```
 
-### Step 3.2 — Track Your Dataset
+### Step 3.2 -- Track Your Dataset
 
 ```bash
 dvc add data/raw/dataset.csv
-git add data/raw/dataset.csv.dvc .gitignore
+git add data/raw/dataset.csv.dvc data/raw/.gitignore
 git commit -m "Track raw dataset v1 with DVC"
 git tag -a "data-v1" -m "Initial dataset version"
 ```
 
-DVC creates a `.dvc` pointer file — the actual data stays out of Git.
+DVC creates a `.dvc` pointer file -- the actual data stays out of Git.
 
-### Step 3.3 — Configure Remote Storage (Local Simulation)
+### Step 3.3 -- Configure Remote Storage (Local Simulation)
 
 ```bash
-# Simulate a remote using a local folder
-mkdir /tmp/dvc-remote
+mkdir -p /tmp/dvc-remote
 dvc remote add -d localremote /tmp/dvc-remote
 dvc push
 ```
 
 In production, replace with:
+
 ```bash
 dvc remote add -d s3remote s3://your-bucket/dvc-store
 ```
 
-### Step 3.4 — Create a DVC Pipeline
+### Step 3.4 -- Create a DVC Pipeline
 
 Create `dvc.yaml`:
 
@@ -325,44 +483,15 @@ test_size: 0.2
 random_state: 42
 ```
 
-Run the pipeline:
-```bash
-dvc repro
-```
+### Step 3.5 -- Fix train.py to Write DVC Outputs
 
-### Step 3.5 — Simulate Version Switch
-
-Make a change to your dataset (e.g., add a row or change a column), then:
-
-```bash
-dvc add data/raw/dataset.csv
-git add data/raw/dataset.csv.dvc
-git commit -m "Dataset updated — v2"
-git tag -a "data-v2" -m "Updated dataset"
-dvc push
-```
-
-Restore v1:
-```bash
-git checkout data-v1
-dvc checkout
-python src/train.py  # Reproduces original results exactly
-```
-
-### Step 3.6 — Fix: output 'models/model.pkl' does not exist
-
-If `dvc repro` fails with this error:
+`dvc.yaml` declares `models/model.pkl` and `reports/metrics.json` as outputs. If `train.py` doesn't write them, `dvc repro` fails with:
 
 ```
-MLflow Run ID: 1b98af26c0314c909a9165b4323048a5
 ERROR: failed to reproduce 'train': output 'models/model.pkl' does not exist
 ```
 
-This means `train.py` runs successfully (MLflow logs the run) but never writes `models/model.pkl` or `reports/metrics.json` to disk — so DVC cannot find its expected outputs.
-
-**Fix — update `src/train.py` to write both files:**
-
-Add `os.makedirs` and both save blocks at the end of the script, inside the `mlflow.start_run` block:
+Update `src/train.py` -- add `os.makedirs` and both save blocks inside the `mlflow.start_run` block:
 
 ```python
 import os
@@ -423,39 +552,48 @@ with mlflow.start_run(run_name=run_name):
         json.dump({"accuracy": round(acc, 4), "f1_score": round(f1, 4)}, mf, indent=2)
 
     print(f"n_estimators={N_ESTIMATORS}  max_depth={MAX_DEPTH}")
-    print(f"Run complete — Accuracy: {acc:.4f} | F1: {f1:.4f}")
+    print(f"Run complete -- Accuracy: {acc:.4f} | F1: {f1:.4f}")
     print(f"MLflow Run ID: {mlflow.active_run().info.run_id}")
     print("Model saved   > models/model.pkl")
     print("Metrics saved > reports/metrics.json")
 ```
 
-**Verify the files are created before running DVC:**
+Verify the files are created, then run the pipeline:
 
 ```bash
 python src/train.py
 ls models/model.pkl        # must exist
 ls reports/metrics.json    # must exist
-```
 
-**Then run DVC:**
-
-```bash
 dvc repro
 dvc push
 git add .
 git commit -m "Fix train.py to write model and metrics for DVC"
 ```
 
-**Root cause:** `dvc.yaml` declares `models/model.pkl` and `reports/metrics.json` as outputs. If `train.py` does not write them, DVC considers the stage failed even if MLflow logged the run successfully. MLflow and DVC track the same training run independently — MLflow tracks metadata, DVC tracks files on disk.
+**Root cause summary:** MLflow and DVC track the same training run independently -- MLflow tracks metadata, DVC tracks files on disk. If `train.py` does not write the declared outputs, DVC considers the stage failed even if MLflow logged the run successfully.
 
-### [x] Checkpoint
+### Step 3.6 -- Simulate Version Switch
 
-- [ ] Dataset tracked with `dvc add` and committed to Git
-- [ ] Pipeline runs via `dvc repro`
-- [ ] `models/model.pkl` and `reports/metrics.json` both exist after run
-- [ ] Successfully switched between dataset versions
+Make a change to your dataset (e.g., add a row or change a column), then:
 
-### Common Issue — DVC Cache Errors
+```bash
+dvc add data/raw/dataset.csv
+git add data/raw/dataset.csv.dvc
+git commit -m "Dataset updated -- v2"
+git tag -a "data-v2" -m "Updated dataset"
+dvc push
+```
+
+Restore v1:
+
+```bash
+git checkout data-v1
+dvc checkout
+python src/train.py  # Reproduces original results exactly
+```
+
+### Common Issue -- DVC Cache Errors
 
 If you see any of the following errors after `dvc checkout` or `dvc repro`:
 
@@ -467,31 +605,9 @@ FileNotFoundError: No such file or directory: 'data/raw/dataset.csv'
 
 This means DVC is tracking files that were never pushed to its cache. Fix in order:
 
-**Step 1 — Restore the dataset**
+**Step 1 -- Restore the dataset** by re-running `src/generate_dataset.py` from Section 0.
 
-If `data/raw/dataset.csv` was deleted by `dvc checkout`, regenerate it:
-
-```python
-import pandas as pd, numpy as np
-np.random.seed(42); n = 1000
-df = pd.DataFrame({
-    'age': np.random.randint(18, 70, n),
-    'income': np.random.normal(50000, 15000, n).clip(15000, 120000).round(2),
-    'credit_score': np.random.randint(300, 850, n),
-    'loan_amount': np.random.normal(15000, 8000, n).clip(1000, 50000).round(2),
-    'employment_years': np.random.randint(0, 30, n),
-    'num_accounts': np.random.randint(1, 10, n),
-    'debt_ratio': np.random.uniform(0.1, 0.9, n).round(4),
-})
-prob = 1/(1+np.exp(-(-0.003*df.credit_score + 0.00001*df.loan_amount
-         - 0.000005*df.income + 1.5*df.debt_ratio
-         - 0.05*df.employment_years + 2.0)))
-df['target'] = (np.random.rand(n) < prob).astype(int)
-df.to_csv('data/raw/dataset.csv', index=False)
-print('Done', df.shape)
-```
-
-**Step 2 — Re-add to DVC and push to cache**
+**Step 2 -- Re-add to DVC and push to cache:**
 
 ```bash
 dvc add data/raw/dataset.csv
@@ -500,21 +616,21 @@ git commit -m "Re-track dataset with valid cache"
 dvc push
 ```
 
-**Step 3 — Run the pipeline to regenerate the model**
+**Step 3 -- Run the pipeline to regenerate the model:**
 
 ```bash
 dvc repro
 dvc push
 ```
 
-**Step 4 — Verify**
+**Step 4 -- Verify:**
 
 ```bash
 dvc status      # should say: Data and pipelines are up to date
 dvc checkout    # should complete with no errors
 ```
 
-**Root cause summary:**
+**Root cause table:**
 
 | Error | Cause | Fix |
 |---|---|---|
@@ -522,7 +638,7 @@ dvc checkout    # should complete with no errors
 | `model.pkl` missing hash | Model was never run through `dvc repro`, only saved manually | Run `dvc repro` to let DVC manage it |
 | Cache out of date | `dvc push` was never run after `dvc add` | Always `dvc push` after `dvc add` |
 
-**Correct workflow going forward — always follow this order:**
+**Correct workflow going forward -- always follow this order:**
 
 ```bash
 # After any change to data or code:
@@ -532,26 +648,27 @@ git add .
 git commit -m "your message"
 ```
 
+### Checkpoint -- Section 3
+
+- [ ] Dataset tracked with `dvc add` and committed to Git
+- [ ] Pipeline runs via `dvc repro`
+- [ ] `models/model.pkl` and `reports/metrics.json` both exist after run
+- [ ] Successfully switched between dataset versions
+
 ---
 
-## Break — 20 Minutes
+## Break -- 15 Minutes
 
 ---
 
-## Section 4 — Validation & Monitoring with Evidently
+## Section 4 -- Validation & Monitoring with Evidently
 
 **Duration: 40 minutes**
 
 ### Goal
 Run model quality validation, detect data drift, and generate monitoring reports.
 
-### Step 4.1 — Install Evidently
-
-```bash
-pip install evidently
-```
-
-Check your version after install — the imports differ by version:
+### Step 4.1 -- Check the Evidently Version
 
 ```bash
 pip show evidently | grep Version
@@ -563,9 +680,9 @@ pip show evidently | grep Version
 | 0.4 - 0.6 | `from evidently.report import Report` |
 | 0.7+ | `from evidently.legacy.report import Report` (used in this workshop) |
 
-### Step 4.2 — Simulate Reference vs. Production Data
+### Step 4.2 -- Simulate Reference vs. Production Data
 
-Create `src/generate_drift.py` to simulate data drift:
+Create `src/generate_drift.py`:
 
 ```python
 import pandas as pd
@@ -589,15 +706,14 @@ print("Reference and production datasets saved.")
 ```
 
 Run it:
+
 ```bash
 python src/generate_drift.py
 ```
 
-### Step 4.3 — Data Drift Report
+### Step 4.3 -- Build Monitoring Reports
 
-Create `src/monitoring.py`.
-
-NOTE: Evidently 0.7+ moved the classic API under `evidently.legacy`. All imports below use this path. If you are on 0.4-0.6, replace `evidently.legacy.report` with `evidently.report` and `evidently.legacy.metric_preset` with `evidently.metric_preset`.
+Create `src/monitoring.py`. Evidently 0.7+ moved the classic API under `evidently.legacy`; if you are on 0.4-0.6, drop `.legacy` from each import path.
 
 ```python
 import os
@@ -609,7 +725,6 @@ from evidently.legacy.pipeline.column_mapping import ColumnMapping
 
 os.makedirs("reports", exist_ok=True)
 
-# Load datasets
 reference  = pd.read_csv("data/processed/reference.csv")
 production = pd.read_csv("data/processed/production.csv")
 
@@ -627,19 +742,7 @@ quality_report = Report(metrics=[DataQualityPreset()])
 quality_report.run(reference_data=ref_features, current_data=prod_features)
 quality_report.save_html("reports/data_quality_report.html")
 print("Quality report saved > reports/data_quality_report.html")
-```
 
-```bash
-python src/monitoring.py
-```
-
-Open `reports/data_drift_report.html` in your browser.
-
-### Step 4.4 — Model Performance Monitoring
-
-Add model prediction tracking to the same `src/monitoring.py` file, appended after the quality report block:
-
-```python
 # --- Model Performance Report ---
 with open("models/model.pkl", "rb") as f:
     model = pickle.load(f)
@@ -659,53 +762,15 @@ perf_report.save_html("reports/model_performance_report.html")
 print("Performance report   > reports/model_performance_report.html")
 ```
 
-The complete `src/monitoring.py` with all three reports combined:
+Run it:
 
-```python
-import os
-import pandas as pd
-import pickle
-from evidently.legacy.report import Report
-from evidently.legacy.metric_preset import DataDriftPreset, DataQualityPreset, ClassificationPreset
-from evidently.legacy.pipeline.column_mapping import ColumnMapping
-
-os.makedirs("reports", exist_ok=True)
-
-reference  = pd.read_csv("data/processed/reference.csv")
-production = pd.read_csv("data/processed/production.csv")
-
-ref_features  = reference.drop("target", axis=1)
-prod_features = production.drop("target", axis=1)
-
-drift_report = Report(metrics=[DataDriftPreset()])
-drift_report.run(reference_data=ref_features, current_data=prod_features)
-drift_report.save_html("reports/data_drift_report.html")
-print("Drift report saved   > reports/data_drift_report.html")
-
-quality_report = Report(metrics=[DataQualityPreset()])
-quality_report.run(reference_data=ref_features, current_data=prod_features)
-quality_report.save_html("reports/data_quality_report.html")
-print("Quality report saved > reports/data_quality_report.html")
-
-with open("models/model.pkl", "rb") as f:
-    model = pickle.load(f)
-
-reference["prediction"]  = model.predict(ref_features)
-production["prediction"] = model.predict(prod_features)
-
-column_mapping = ColumnMapping(target="target", prediction="prediction")
-
-perf_report = Report(metrics=[ClassificationPreset()])
-perf_report.run(
-    reference_data=reference,
-    current_data=production,
-    column_mapping=column_mapping
-)
-perf_report.save_html("reports/model_performance_report.html")
-print("Performance report   > reports/model_performance_report.html")
+```bash
+python src/monitoring.py
 ```
 
-### Step 4.5 — Validation Gates (Automated Quality Check)
+Open `reports/data_drift_report.html`, `reports/data_quality_report.html`, and `reports/model_performance_report.html` in your browser.
+
+### Step 4.4 -- Validation Gates (Automated Quality Check)
 
 Create `src/validate.py` to enforce quality thresholds:
 
@@ -724,7 +789,7 @@ with open("reports/metrics.json") as f:
 failed = []
 for metric, threshold in THRESHOLDS.items():
     value = metrics.get(metric, 0)
-    status = "[x] PASS" if value >= threshold else "❌ FAIL"
+    status = "PASS" if value >= threshold else "FAIL"
     print(f"{status} | {metric}: {value:.4f} (threshold: {threshold})")
     if value < threshold:
         failed.append(metric)
@@ -736,11 +801,13 @@ else:
     print("\nAll validation checks passed. Model is deployment-ready.")
 ```
 
+Run it:
+
 ```bash
 python src/validate.py
 ```
 
-### [x] Checkpoint
+### Checkpoint -- Section 4
 
 - [ ] Data drift report generated in `reports/`
 - [ ] Feature distribution shift visible for drifted columns
@@ -749,14 +816,14 @@ python src/validate.py
 
 ---
 
-## Section 5 — End-to-End Pipeline Execution
+## Section 5 -- End-to-End Pipeline Execution
 
 **Duration: 20 minutes**
 
 ### Goal
-Execute the full pipeline from versioned data through to monitoring report — in a single reproducible sequence.
+Execute the full pipeline from versioned data through to monitoring report -- in a single reproducible sequence.
 
-### Step 5.1 — Full Pipeline Script
+### Step 5.1 -- Full Pipeline Script
 
 Create `run_pipeline.sh`:
 
@@ -790,23 +857,24 @@ dvc push
 
 echo ""
 echo "=============================="
-echo " Pipeline Complete [x]"
+echo " Pipeline Complete"
 echo "=============================="
 echo "Artifacts:"
 echo "  Model      > models/model.pkl"
 echo "  Metrics    > reports/metrics.json"
 echo "  Drift      > reports/data_drift_report.html"
 echo "  Quality    > reports/data_quality_report.html"
-echo "  MLflow UI  > http://172.22.109.115:5000"
+echo "  MLflow UI  > http://localhost:5000"
 ```
 
 Make it executable and run:
+
 ```bash
 chmod +x run_pipeline.sh
 ./run_pipeline.sh
 ```
 
-### Step 5.2 — Verify Reproducibility
+### Step 5.2 -- Verify Reproducibility
 
 Clean the model output and re-run:
 
@@ -817,7 +885,7 @@ rm -f models/model.pkl
 
 The pipeline should produce the **exact same metrics** as the previous run.
 
-### Step 5.3 — What Makes This Cloud-Ready?
+### Step 5.3 -- What Makes This Cloud-Ready?
 
 | Principle | How It's Implemented |
 |---|---|
@@ -827,44 +895,44 @@ The pipeline should produce the **exact same metrics** as the previous run.
 | Portable metadata | MLflow tracking URI is configurable |
 | Separation of concerns | Code (Git) / Data (DVC) / Models (DVC) / Metadata (MLflow) |
 
-### Step 5.4 — Migration to Cloud (Conceptual Map)
+### Step 5.4 -- Migration to Cloud (Conceptual Map)
 
 ```
 Local                          Cloud Equivalent
-─────────────────────────────────────────────────────
-/tmp/dvc-remote          >     S3 / GCS / Azure Blob
-mlflow server (local)    >     MLflow on EC2 / Databricks
-python run_pipeline.sh   >     Airflow / Kubeflow / SageMaker Pipelines
-models/model.pkl         >     MLflow Model Registry
+-----------------------------------------------------
+/tmp/dvc-remote          ->    S3 / GCS / Azure Blob
+mlflow server (local)    ->    MLflow on EC2 / Databricks
+python run_pipeline.sh   ->    Airflow / Kubeflow / SageMaker Pipelines
+models/model.pkl         ->    MLflow Model Registry
 ```
 
-> The pipeline logic doesn't change — only the infrastructure wiring does.
+> The pipeline logic doesn't change -- only the infrastructure wiring does.
 
-### [x] Checkpoint
+### Checkpoint -- Section 5
 
 - [ ] Full pipeline runs end-to-end with `run_pipeline.sh`
 - [ ] Reproducibility verified by deleting and re-running
-- [ ] All 4 artifacts present: model, metrics, drift report, quality report
+- [ ] All artifacts present: model, metrics, drift report, quality report
 - [ ] Cloud migration path is clear conceptually
 
 ---
 
-## Section 6 — Conclusion & Q&A
+## Section 6 -- Conclusion & Q&A
 
-**Duration: 30 minutes**
+**Duration: 20 minutes**
 
-### What Changed: Local ML > MLOps
+### What Changed: Local ML to MLOps
 
 | Capability | Local Notebook | This Pipeline |
 |---|---|---|
-| Parameter tracking | [no] None | [x] MLflow |
-| Experiment history | [no] None | [x] MLflow UI |
-| Dataset versioning | [no] None | [x] DVC |
-| Model versioning | [no] Overwritten | [x] DVC + MLflow |
-| Reproducibility | [no] Manual/fragile | [x] `dvc repro` |
-| Quality gates | [no] None | [x] `validate.py` |
-| Drift detection | [no] None | [x] Evidently |
-| Cloud portability | [no] Local only | [x] Platform-agnostic |
+| Parameter tracking | None | MLflow |
+| Experiment history | None | MLflow UI |
+| Dataset versioning | None | DVC |
+| Model versioning | Overwritten | DVC + MLflow |
+| Reproducibility | Manual / fragile | `dvc repro` |
+| Quality gates | None | `validate.py` |
+| Drift detection | None | Evidently |
+| Cloud portability | Local only | Platform-agnostic |
 
 ### Do's and Don'ts
 
@@ -873,36 +941,37 @@ models/model.pkl         >     MLflow Model Registry
 - Log every meaningful hyperparameter and metric
 - Use validation gates before promoting a model
 - Keep storage, compute, and orchestration concerns separate
+- Always work inside the project's virtual environment
 
 **Don't:**
 - Hard-code file paths or credentials in scripts
 - Overwrite model files without versioning
-- Skip monitoring in production — drift happens silently
+- Skip monitoring in production -- drift happens silently
 - Treat reproducibility as optional
 
 ### Tools Summary
 
 | Tool | Purpose |
 |---|---|
+| **venv** | Isolated Python environment for reproducible installs |
 | **MLflow** | Experiment tracking, model registry |
-| **Weights & Biases** | Alternative to MLflow (cloud-native, richer UI) |
 | **DVC** | Data and model versioning, pipeline orchestration |
 | **Evidently** | Data drift detection, model monitoring reports |
 | **Git** | Code versioning (works in tandem with DVC) |
 
 ### Further Reading
 
-- [MLflow Documentation](https://mlflow.org/docs/latest/index.html)
-- [DVC Documentation](https://dvc.org/doc)
-- [Evidently Documentation](https://docs.evidentlyai.com)
-- [Weights & Biases](https://docs.wandb.ai)
-- [Made With ML — MLOps](https://madewithml.com)
+- MLflow Documentation: https://mlflow.org/docs/latest/index.html
+- DVC Documentation: https://dvc.org/doc
+- Evidently Documentation: https://docs.evidentlyai.com
+- Python venv Documentation: https://docs.python.org/3/library/venv.html
 
 ---
 
-## Appendix — Troubleshooting
+## Appendix -- Troubleshooting
 
 **MLflow UI not loading:**
+
 ```bash
 # Ensure port 5000 is free
 lsof -i :5000
@@ -910,34 +979,13 @@ mlflow server --host 0.0.0.0 --port 5001 --allowed-hosts "*"
 ```
 
 **DVC checkout fails:**
+
 ```bash
-# Pull data from remote first
 dvc pull
 dvc checkout
 ```
 
-**DVC cache missing — dataset deleted or model.pkl has no hash:**
-
-Symptoms: `WARNING: No file hash info found`, `Checkout failed for models/model.pkl`, or `FileNotFoundError: data/raw/dataset.csv` immediately after `dvc checkout`.
-
-```bash
-# 1. Restore and re-track the dataset (see Section 3 — Common Issue for full script)
-dvc add data/raw/dataset.csv
-git add data/raw/dataset.csv.dvc
-git commit -m "Re-track dataset with valid cache"
-dvc push
-
-# 2. Regenerate the model via pipeline (never save model.pkl manually)
-dvc repro
-dvc push
-
-# 3. Confirm everything is clean
-dvc status
-```
-
-Rule: always run `dvc push` immediately after `dvc add` or `dvc repro`. Never copy `model.pkl` manually — let `dvc repro` create it.
-
-**Evidently import error — ModuleNotFoundError or ImportError:**
+**Evidently import error -- ModuleNotFoundError or ImportError:**
 
 Evidently 0.7+ moved the classic API under `evidently.legacy`. Check your version first:
 
@@ -945,10 +993,10 @@ Evidently 0.7+ moved the classic API under `evidently.legacy`. Check your versio
 pip show evidently | grep Version
 ```
 
-If you see `ModuleNotFoundError: No module named 'evidently.report'` or `ImportError: cannot import name 'ColumnMapping' from 'evidently'`, update all imports in `src/monitoring.py`:
+If you see `ModuleNotFoundError: No module named 'evidently.report'` or `ImportError: cannot import name 'ColumnMapping' from 'evidently'`, update imports in `src/monitoring.py`:
 
 ```python
-# Old imports (Evidently 0.4 - 0.6) — causes errors on 0.7+
+# Old imports (Evidently 0.4 - 0.6) -- causes errors on 0.7+
 from evidently.report import Report
 from evidently.metric_preset import DataDriftPreset
 from evidently import ColumnMapping
@@ -960,6 +1008,7 @@ from evidently.legacy.pipeline.column_mapping import ColumnMapping
 ```
 
 If the package is missing entirely:
+
 ```bash
 pip install --upgrade evidently
 ```
@@ -973,8 +1022,12 @@ pip install --upgrade evidently
 - Confirm the same dataset version is checked out via `dvc checkout`
 
 **All experiment runs show identical metrics:**
-- Ensure `train.py` reads env vars with `os.environ.get()` — hardcoded values ignore shell exports
+- Ensure `train.py` reads env vars with `os.environ.get()` -- hardcoded values ignore shell exports
 - Verify with: `N_ESTIMATORS=200 python -c "import os; print(os.environ.get('N_ESTIMATORS'))"`
+
+**"command not found" for python, pip, mlflow, or dvc:**
+- Confirm the virtual environment is activated (prompt should show `(venv)`)
+- Re-activate with `source venv/bin/activate` (macOS/Linux) or `venv\Scripts\Activate.ps1` (Windows)
 
 ---
 
