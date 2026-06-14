@@ -91,6 +91,7 @@ A virtual environment keeps this workshop's dependencies isolated from the rest 
 **macOS / Linux:**
 
 ```bash
+sudo  apt install python3.11-venv -y
 python3 -m venv venv
 source venv/bin/activate
 ```
